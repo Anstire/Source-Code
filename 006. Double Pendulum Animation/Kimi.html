@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Double Pendulum Loop</title>
+<script src="https://unpkg.com/ccapture.js@1.1.0/build/CCapture.all.min.js"></script>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: #050510;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+  }
+  #app {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #sim {
+    display: block;
+    border: 1px solid #1a1a2e;
+    box-shadow: 0 0 40px rgba(0, 255, 255, 0.05);
+    background: #050510;
+  }
+  #controls {
+    position: fixed;
+    top: 18px;
+    left: 18px;
+    z-index: 10;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    pointer-events: none;
+  }
+  #recordBtn {
+    background: linear-gradient(135deg, #00d4ff, #a855f7);
+    border: none;
+    padding: 14px 32px;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    cursor: pointer;
+    text-transform: uppercase;
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.4), 0 4px 15px rgba(0,0,0,0.3);
+    transition: transform 0.15s, box-shadow 0.15s;
+    pointer-events: auto;
+    position: relative;
+  }
+  #recordBtn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 35px rgba(0, 212, 255, 0.6), 0 6px 20px rgba(0,0,0,0.4);
+  }
+  #recordBtn:active {
+    transform: translateY(0);
+  }
+  #recordBtn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+  }
+  #status {
+    color: #00d4ff;
+    font-size: 14px;
+    min-width: 160px;
+    text-align: center;
+    text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+    font-weight: 500;
+    letter-spacing: 0.5px;
+  }
+</style>
+<base target="_blank">
+</head>
+<body>
+<div id="app">
+  <canvas id="sim"></canvas>
+  <div id="controls">
+    <button id="recordBtn">Record</button>
+    <span id="status">Ready</span>
+  </div>
+</div>
+
+<script>
+  const DISPLAY_W = 800;
+  const DISPLAY_H = 800;
+  const DPR = 2;
+  const CANVAS_W = DISPLAY_W * DPR;
+  const CANVAS_H = DISPLAY_H * DPR;
+
+  const canvas = document.getElementById('sim');
+  canvas.width = CANVAS_W;
+  canvas.height = CANVAS_H;
+  canvas.style.width = DISPLAY_W + 'px';
+  canvas.style.height = DISPLAY_H + 'px';
+
+  const ctx = canvas.getContext('2d');
+
+  const TOTAL_FRAMES = 600;
+  const DURATION = 10;
+
+  const L1 = 220 * DPR;
+  const L2 = 180 * DPR;
+  const ORIGIN_X = CANVAS_W / 2;
+  const ORIGIN_Y = CANVAS_H / 3;
+
+  const FREQ1 = 4;
+  const FREQ2 = 7;
+  const PHASE1 = Math.PI / 4;
+  const PHASE2 = Math.PI / 6;
+  const AMP1 = 0.8;
+  const AMP2 = 1.0;
+
+  const TRAIL_LENGTH = 80;
+  const GLOW_BLUR = 12 * DPR;
+
+  const trail1 = [];
+  const trail2 = [];
+
+  let frameCount = 0;
+  let isRecording = false;
+  let capturer = null;
+
+  const recordBtn = document.getElementById('recordBtn');
+  const statusEl = document.getElementById('status');
+
+  recordBtn.addEventListener('click', () => {
+    if (isRecording) return;
+    capturer = new CCapture({
+      format: 'webm',
+      framerate: 60,
+      quality: 100,
+      videoBitsPerSecond: 5000000,
+      name: 'double_pendulum_loop'
+    });
+    frameCount = 0;
+    trail1.length = 0;
+    trail2.length = 0;
+    isRecording = true;
+    capturer.start();
+    recordBtn.disabled = true;
+    statusEl.textContent = 'Recording...';
+    statusEl.style.color = '#a855f7';
+    statusEl.style.textShadow = '0 0 10px rgba(168, 85, 247, 0.5)';
+    loop();
+  });
+
+  function getAngles(t) {
+    const theta1 = AMP1 * Math.sin(2 * Math.PI * FREQ1 * t + PHASE1);
+    const theta2 = AMP2 * Math.sin(2 * Math.PI * FREQ2 * t + PHASE2);
+    return { theta1, theta2 };
+  }
+
+  function getPositions(t) {
+    const { theta1, theta2 } = getAngles(t);
+    const x1 = ORIGIN_X + L1 * Math.sin(theta1);
+    const y1 = ORIGIN_Y + L1 * Math.cos(theta1);
+    const x2 = x1 + L2 * Math.sin(theta2);
+    const y2 = y1 + L2 * Math.cos(theta2);
+    return { x1, y1, x2, y2 };
+  }
+
+  function drawGlowLine(x1, y1, x2, y2, color, width) {
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = GLOW_BLUR;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawTrail(trail, color) {
+    if (trail.length < 2) return;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let i = 1; i < trail.length; i++) {
+      const alpha = (i / trail.length) * 0.6;
+      ctx.strokeStyle = color.replace('1)', alpha + ')');
+      ctx.shadowColor = color.replace('1)', (alpha * 0.5) + ')');
+      ctx.shadowBlur = GLOW_BLUR * alpha;
+      ctx.lineWidth = 3 * DPR * (i / trail.length);
+      ctx.beginPath();
+      ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+      ctx.lineTo(trail[i].x, trail[i].y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawPendulum(t) {
+    const { x1, y1, x2, y2 } = getPositions(t);
+
+    trail1.push({ x: x1, y: y1 });
+    trail2.push({ x: x2, y: y2 });
+    if (trail1.length > TRAIL_LENGTH) trail1.shift();
+    if (trail2.length > TRAIL_LENGTH) trail2.shift();
+
+    ctx.fillStyle = 'rgba(5, 5, 16, 0.25)';
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+    drawTrail(trail1, 'rgba(0, 212, 255, 1)');
+    drawTrail(trail2, 'rgba(168, 85, 247, 1)');
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 212, 255, 0.8)';
+    ctx.shadowBlur = GLOW_BLUR * 1.5;
+    ctx.fillStyle = '#00d4ff';
+    ctx.beginPath();
+    ctx.arc(ORIGIN_X, ORIGIN_Y, 6 * DPR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    drawGlowLine(ORIGIN_X, ORIGIN_Y, x1, y1, 'rgba(0, 212, 255, 0.9)', 4 * DPR);
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(168, 85, 247, 0.8)';
+    ctx.shadowBlur = GLOW_BLUR * 1.5;
+    ctx.fillStyle = '#a855f7';
+    ctx.beginPath();
+    ctx.arc(x1, y1, 5 * DPR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    drawGlowLine(x1, y1, x2, y2, 'rgba(168, 85, 247, 0.9)', 4 * DPR);
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(168, 85, 247, 1)';
+    ctx.shadowBlur = GLOW_BLUR * 2;
+    ctx.fillStyle = '#d8b4fe';
+    ctx.beginPath();
+    ctx.arc(x2, y2, 8 * DPR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function loop() {
+    if (!isRecording && frameCount >= TOTAL_FRAMES) {
+      frameCount = 0;
+      trail1.length = 0;
+      trail2.length = 0;
+    }
+
+    const progress = frameCount / TOTAL_FRAMES;
+    const t = progress * DURATION;
+
+    drawPendulum(t);
+
+    if (isRecording && capturer) {
+      capturer.capture(canvas);
+    }
+
+    frameCount++;
+
+    if (isRecording && frameCount >= TOTAL_FRAMES) {
+      isRecording = false;
+      capturer.stop();
+      capturer.save();
+      capturer = null;
+      recordBtn.disabled = false;
+      statusEl.textContent = 'Saved!';
+      statusEl.style.color = '#00d4ff';
+      statusEl.style.textShadow = '0 0 10px rgba(0, 212, 255, 0.5)';
+      frameCount = 0;
+      trail1.length = 0;
+      trail2.length = 0;
+      return;
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  loop();
+</script>
+</body>
+</html>

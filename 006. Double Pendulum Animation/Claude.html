@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neon Double Pendulum — Perfect 10s Loop</title>
+<script src="https://cdn.jsdelivr.net/npm/ccapture.js@1.1.0/build/CCapture.all.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
+  }
+
+  #c {
+    width: 800px;
+    height: 600px;
+    display: block;
+  }
+
+  /* ── HUD ──────────────────────────────────────────────────── */
+  #hud {
+    position: fixed;
+    top: 24px;
+    left: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    z-index: 10;
+  }
+
+  #recordBtn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    background: transparent;
+    border: 1px solid rgba(0, 232, 255, 0.7);
+    color: #00e8ff;
+    font-family: inherit;
+    font-size: 12px;
+    letter-spacing: 3px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: background 0.25s, box-shadow 0.25s;
+    outline: none;
+  }
+  #recordBtn:hover {
+    background: rgba(0, 232, 255, 0.06);
+    box-shadow: 0 0 22px rgba(0, 232, 255, 0.35), inset 0 0 12px rgba(0, 232, 255, 0.06);
+  }
+  #recordBtn.recording {
+    border-color: rgba(255, 48, 140, 0.8);
+    color: #ff308c;
+    animation: hudPulse 1.2s ease-in-out infinite;
+  }
+  @keyframes hudPulse { 50% { opacity: 0.45; } }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+
+  #metrics {
+    font-size: 11px;
+    color: rgba(0, 220, 255, 0.5);
+    line-height: 2;
+    letter-spacing: 1.5px;
+  }
+  #metrics span { color: rgba(0, 220, 255, 0.9); }
+
+  /* progress bar */
+  #bar-track {
+    width: 170px;
+    height: 2px;
+    background: rgba(0, 220, 255, 0.12);
+    position: relative;
+    overflow: hidden;
+  }
+  #bar-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 0%;
+    background: linear-gradient(90deg, #00e8ff 0%, #b300ff 55%, #ff308c 100%);
+    transition: width 60ms linear;
+  }
+
+  /* legend */
+  #legend {
+    font-size: 10px;
+    color: rgba(0, 220, 255, 0.35);
+    letter-spacing: 1px;
+    line-height: 2;
+  }
+  .leg-arm1 { color: rgba(0, 232, 255, 0.65); }
+  .leg-arm2 { color: rgba(185, 0, 255, 0.75); }
+  .leg-tip  { color: rgba(255, 48, 140, 0.75); }
+
+  #status-line {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: rgba(0, 220, 255, 0.4);
+  }
+  #status-line.active { color: #ff308c; }
+
+  /* ── Top-right info ────────────────────────────────────────── */
+  #info-tr {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    text-align: right;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    color: rgba(0, 200, 255, 0.22);
+    line-height: 2;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+
+<!--
+  ╔══════════════════════════════════════════════════════════════╗
+  ║  NEON DOUBLE PENDULUM — PERFECT 10s LOOP                    ║
+  ║  Internal canvas: 1600 × 1200  (2× retina of 800 × 600)    ║
+  ║  Loop math: parametric cosine, integer cycle counts         ║
+  ║  Time: driven solely by frameCount — zero system clock use  ║
+  ╚══════════════════════════════════════════════════════════════╝
+-->
+
+<canvas id="c" width="1600" height="1200"></canvas>
+
+<div id="hud">
+  <button id="recordBtn"><span class="dot"></span>RECORD</button>
+  <div id="metrics">
+    FRAME&nbsp; <span id="fc">000</span> / 600<br>
+    TIME&nbsp;&nbsp; <span id="tm">0.00</span>s<br>
+    FQ&nbsp;&nbsp;&nbsp;&nbsp; ARM1=3&thinsp;Hz &nbsp;ARM2=7&thinsp;Hz
+  </div>
+  <div id="bar-track"><div id="bar-fill"></div></div>
+  <div id="legend">
+    <span class="leg-arm1">━━</span> ARM 1 · CYAN<br>
+    <span class="leg-arm2">━━</span> ARM 2 · VIOLET<br>
+    <span class="leg-tip">━━</span> TIP · TRAIL
+  </div>
+  <div id="status-line">PREVIEW</div>
+</div>
+
+<div id="info-tr">
+  F1 = 3 CYCLES<br>
+  F2 = 7 CYCLES<br>
+  10s · 600fr<br>
+  Ø CHAOS
+</div>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════
+//  CANVAS — internal resolution 1600 × 1200 (display: 800 × 600)
+// ═══════════════════════════════════════════════════════════════
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const W = 1600, H = 1200;
+
+// ═══════════════════════════════════════════════════════════════
+//  LOOP CONSTANTS
+//  Using cosine with integer frequencies guarantees:
+//    cos(2π · F · 0)   = cos(2π · F · 1)   → angles match at frame 0 & 600
+//  A phase offset on arm 2 is safe because it cancels at t=1.
+// ═══════════════════════════════════════════════════════════════
+const TOTAL_FRAMES = 600;          // 60 fps × 10 s
+const TRAIL_LEN    = 220;          // ~3.67 s of tail history
+
+const OX = W / 2;                  // pivot x (canvas centre)
+const OY = Math.round(H * 0.285); // pivot y (upper third)
+
+const L1 = 295;                    // arm-1 length (internal px)
+const L2 = 245;                    // arm-2 length (internal px)
+
+const A1  = 1.12;                  // arm-1 amplitude (rad)
+const A2  = 1.32;                  // arm-2 amplitude (rad)
+const F1  = 3;                     // arm-1 integer cycles in 10 s
+const F2  = 7;                     // arm-2 integer cycles in 10 s
+const PH2 = Math.PI / 3;          // arm-2 phase (any value keeps loop intact)
+
+// ═══════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════
+let frameCount  = 0;
+let isRecording = false;
+let capturer    = null;
+
+const trail = [];   // [{x, y}, …] — tip positions, oldest first
+
+// ═══════════════════════════════════════════════════════════════
+//  PARAMETRIC MATH — zero chaos, pure harmony
+// ═══════════════════════════════════════════════════════════════
+function getAngles(f) {
+  const p  = f / TOTAL_FRAMES;
+  const t1 = A1 * Math.cos(2 * Math.PI * F1 * p);
+  const t2 = A2 * Math.cos(2 * Math.PI * F2 * p + PH2);
+  return { t1, t2 };
+}
+
+function getPositions(f) {
+  const { t1, t2 } = getAngles(f);
+  const x1 = OX + L1 * Math.sin(t1);
+  const y1 = OY + L1 * Math.cos(t1);
+  const x2 = x1 + L2 * Math.sin(t2);
+  const y2 = y1 + L2 * Math.cos(t2);
+  return { x1, y1, x2, y2 };
+}
+
+// Pre-populate the trail history so frame 0 already shows a full tail.
+// Fills with the last TRAIL_LEN positions before `startFrame` in the cycle.
+function initTrail(startFrame) {
+  trail.length = 0;
+  for (let i = TRAIL_LEN - 1; i >= 0; i--) {
+    let f = startFrame - i;
+    f = ((f % TOTAL_FRAMES) + TOTAL_FRAMES) % TOTAL_FRAMES;
+    const { x2, y2 } = getPositions(f);
+    trail.push({ x: x2, y: y2 });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DRAW HELPERS
+// ═══════════════════════════════════════════════════════════════
+
+// Multi-pass glow line: outer halo + bright core
+function drawGlowLine(ax, ay, bx, by, coreCol, glowCol, coreW, glowW, shadowBlur) {
+  // — outer halo —
+  ctx.save();
+  ctx.strokeStyle = glowCol;
+  ctx.lineWidth   = glowW;
+  ctx.lineCap     = 'round';
+  ctx.shadowBlur  = shadowBlur * 1.8;
+  ctx.shadowColor = glowCol;
+  ctx.globalAlpha = 0.28;
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.stroke();
+  ctx.restore();
+
+  // — medium glow —
+  ctx.save();
+  ctx.strokeStyle = coreCol;
+  ctx.lineWidth   = glowW * 0.45;
+  ctx.lineCap     = 'round';
+  ctx.shadowBlur  = shadowBlur;
+  ctx.shadowColor = coreCol;
+  ctx.globalAlpha = 0.55;
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.stroke();
+  ctx.restore();
+
+  // — bright core —
+  ctx.save();
+  ctx.strokeStyle = coreCol;
+  ctx.lineWidth   = coreW;
+  ctx.lineCap     = 'round';
+  ctx.shadowBlur  = shadowBlur * 0.5;
+  ctx.shadowColor = coreCol;
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Stacked radial glow circle
+function drawGlowDot(x, y, r, col1, col2, blur) {
+  // outer soft bloom
+  ctx.save();
+  ctx.fillStyle   = col1;
+  ctx.shadowBlur  = blur * 2.5;
+  ctx.shadowColor = col1;
+  ctx.globalAlpha = 0.22;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 2.8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // mid glow
+  ctx.save();
+  ctx.fillStyle   = col1;
+  ctx.shadowBlur  = blur;
+  ctx.shadowColor = col1;
+  ctx.globalAlpha = 0.65;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // hot white centre
+  ctx.save();
+  ctx.fillStyle   = col2;
+  ctx.shadowBlur  = blur * 0.4;
+  ctx.shadowColor = col2;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.35, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MAIN DRAW  — called via requestAnimationFrame
+//  Time is driven ENTIRELY by frameCount. No Date/performance API.
+// ═══════════════════════════════════════════════════════════════
+function draw() {
+
+  // ── 1. Compute positions for current frame ──────────────────
+  const { x1, y1, x2, y2 } = getPositions(frameCount);
+
+  // ── 2. Append tip to trail ──────────────────────────────────
+  trail.push({ x: x2, y: y2 });
+  if (trail.length > TRAIL_LEN) trail.shift();
+
+  // ── 3. Background ───────────────────────────────────────────
+  ctx.fillStyle = '#03030e';
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle radial depth fog, centred below the pivot
+  const fog = ctx.createRadialGradient(OX, OY + 280, 80, OX, OY + 280, W * 0.72);
+  fog.addColorStop(0, 'rgba(5, 3, 28, 0)');
+  fog.addColorStop(1, 'rgba(0, 0, 0, 0.65)');
+  ctx.fillStyle = fog;
+  ctx.fillRect(0, 0, W, H);
+
+  // Very faint vertical axis reference
+  ctx.save();
+  ctx.strokeStyle = 'rgba(0, 200, 255, 0.04)';
+  ctx.lineWidth   = 1;
+  ctx.setLineDash([8, 24]);
+  ctx.beginPath();
+  ctx.moveTo(OX, OY);
+  ctx.lineTo(OX, H);
+  ctx.stroke();
+  ctx.restore();
+
+  // ── 4. Trail ────────────────────────────────────────────────
+  ctx.save();
+  ctx.lineCap = 'round';
+
+  for (let i = 1; i < trail.length; i++) {
+    const frac  = i / trail.length;               // 0=oldest  1=newest
+    const alpha = Math.pow(frac, 1.9) * 0.88;
+
+    // Colour gradient: deep cyan → electric violet → hot pink
+    let r, g, b;
+    if (frac < 0.5) {
+      const t = frac * 2;                         // 0→1 in first half
+      r = Math.round(0   + t * 185);              // 0   → 185
+      g = Math.round(232 * (1 - t * 0.95));       // 232 → 12
+      b = 255;
+    } else {
+      const t = (frac - 0.5) * 2;                 // 0→1 in second half
+      r = Math.round(185 + t * 70);               // 185 → 255
+      g = Math.round(12  * (1 - t));              // 12  → 0
+      b = Math.round(255 - t * 101);              // 255 → 154
+    }
+
+    ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+    ctx.lineWidth   = 1.8 + frac * 3.8;
+    ctx.shadowBlur  = 5  + frac * 26;
+    ctx.shadowColor = `rgba(${r},${g},${b},${alpha * 0.55})`;
+
+    ctx.beginPath();
+    ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+    ctx.lineTo(trail[i].x,     trail[i].y);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // ── 5. Arm 1 — cyan ─────────────────────────────────────────
+  drawGlowLine(
+    OX, OY, x1, y1,
+    'rgba(0, 232, 255, 1)',
+    'rgba(0, 200, 255, 0.7)',
+    4.5, 22, 32
+  );
+
+  // ── 6. Arm 2 — violet-purple ─────────────────────────────────
+  drawGlowLine(
+    x1, y1, x2, y2,
+    'rgba(192, 0, 255, 1)',
+    'rgba(160, 0, 255, 0.7)',
+    4.5, 22, 32
+  );
+
+  // ── 7. Joints & dots ─────────────────────────────────────────
+
+  // Ceiling mount — pivot point
+  ctx.save();
+  ctx.strokeStyle = 'rgba(0, 200, 255, 0.18)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(OX - 32, OY - 18); ctx.lineTo(OX, OY);
+  ctx.moveTo(OX + 32, OY - 18); ctx.lineTo(OX, OY);
+  ctx.stroke();
+  ctx.restore();
+  drawGlowDot(OX, OY, 10, '#00e8ff', '#ffffff', 36);
+
+  // Elbow joint
+  drawGlowDot(x1, y1, 11, '#9a00ff', '#e0aaff', 42);
+
+  // Tip — brightest, most vivid point
+  drawGlowDot(x2, y2, 13, '#ff2090', '#ffffff', 54);
+
+  // ── 8. HUD updates ───────────────────────────────────────────
+  document.getElementById('fc').textContent  = String(frameCount).padStart(3, '0');
+  document.getElementById('tm').textContent  = (frameCount / 60).toFixed(2);
+  document.getElementById('bar-fill').style.width = `${(frameCount / TOTAL_FRAMES) * 100}%`;
+
+  // ── 9. CCapture ──────────────────────────────────────────────
+  //   capture() is called AFTER all drawing is complete.
+  if (isRecording) {
+    capturer.capture(canvas);
+
+    if (frameCount === TOTAL_FRAMES - 1) {
+      // Frame 599 was the last — stop and save before advancing
+      capturer.stop();
+      capturer.save();
+      isRecording = false;
+
+      const btn = document.getElementById('recordBtn');
+      btn.innerHTML  = '<span class="dot" style="background:#00ff88"></span>SAVED';
+      btn.classList.remove('recording');
+      document.getElementById('status-line').textContent = 'SAVED — CHECK DOWNLOADS';
+      document.getElementById('status-line').classList.remove('active');
+    }
+  }
+
+  // ── 10. Advance frame (wraps perfectly at 600) ───────────────
+  frameCount = (frameCount + 1) % TOTAL_FRAMES;
+
+  requestAnimationFrame(draw);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RECORD BUTTON
+// ═══════════════════════════════════════════════════════════════
+document.getElementById('recordBtn').addEventListener('click', function () {
+  if (isRecording) return;
+
+  // Create a fresh CCapture instance
+  capturer = new CCapture({
+    format:            'webm',
+    framerate:          60,
+    quality:            100,
+    videoBitsPerSecond: 5_000_000,   // 5 Mbps — prevents gradient banding
+    name:              'double-pendulum-neon-loop'
+  });
+
+  // Reset counter & pre-fill trail → seamless first frame
+  frameCount = 0;
+  initTrail(0);
+
+  capturer.start();
+  isRecording = true;
+
+  this.innerHTML = '<span class="dot"></span>RECORDING';
+  this.classList.add('recording');
+
+  const sl = document.getElementById('status-line');
+  sl.textContent = 'REC · 0 / 600 FRAMES';
+  sl.classList.add('active');
+});
+
+// Update status line frame count while recording
+const _origDraw = draw;
+setInterval(() => {
+  if (isRecording) {
+    document.getElementById('status-line').textContent =
+      `REC · ${String(frameCount).padStart(3,'0')} / 600`;
+  }
+}, 100);
+
+// ═══════════════════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════════════════
+initTrail(0);  // warm up trail with the last TRAIL_LEN positions before t=0
+draw();
+</script>
+</body>
+</html>

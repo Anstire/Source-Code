@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Perfect Loop Double Pendulum</title>
+    <!-- CCapture.js CDN -->
+    <script src="https://unpkg.com/ccapture.js@1.1.0/build/CCapture.all.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 40px 0; /* Adds breathing room so the button isn't kissing the bottom edge */
+            background-color: #030308;
+            color: white;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: auto; /* Allows scrolling if the screen is too small */
+        }
+
+        /* The display canvas is 800x800, but internally it renders at 1600x1600 for retina clarity */
+        canvas {
+            width: 800px;
+            height: 800px;
+            background-color: #030308;
+            box-shadow: 0 0 40px rgba(0, 255, 255, 0.1);
+            border: 1px solid #1a1a2e;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            background: #00ffff;
+            color: #000;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.5);
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        button:hover {
+            background: #ffffff;
+            box-shadow: 0 0 25px rgba(255, 255, 255, 0.8);
+        }
+
+        button:disabled {
+            background: #333;
+            color: #777;
+            box-shadow: none;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="pendulumCanvas"></canvas>
+    <button id="recordBtn">Record Perfect Loop</button>
+
+    <script>
+        const canvas = document.getElementById('pendulumCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Internal resolution scaled 2x for Retina-sharp rendering
+        canvas.width = 1600;
+        canvas.height = 1600;
+
+        // Constants
+        const TOTAL_FRAMES = 600; // 10 seconds at 60fps
+        let frameCount = 0;
+        let isRecording = false;
+
+        // CCapture Configuration
+        const capturer = new CCapture({
+            format: 'webm',
+            framerate: 60,
+            quality: 100,
+            videoBitsPerSecond: 5000000 // 5 Mbps to prevent gradient/trail artifacting
+        });
+
+        // Initialize Canvas Background
+        ctx.fillStyle = '#030308';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Record Button Logic
+        const recordBtn = document.getElementById('recordBtn');
+        recordBtn.addEventListener('click', () => {
+            isRecording = true;
+            frameCount = 0; // Hard reset to frame 0
+            recordBtn.innerText = "Recording... (Please Wait)";
+            recordBtn.disabled = true;
+            
+            // Hard clear the canvas to prevent ghost trails from previous cycles
+            ctx.fillStyle = '#030308';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            capturer.start();
+        });
+
+        function renderFrame() {
+            // 1. Fading Motion Trail
+            // Using a very low opacity fill instead of clearRect to leave glowing tails
+            ctx.fillStyle = 'rgba(3, 3, 8, 0.08)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 2. Deterministic Timing Progress (0.0 to 1.0)
+            const progress = frameCount / TOTAL_FRAMES;
+
+            // 3. Parametric Harmonic Equations (Pseudo-Physics)
+            // Exact integer frequencies ensure starting position matches ending position perfectly
+            const freq1 = 4; // Cycles exactly 4 times
+            const freq2 = 7; // Cycles exactly 7 times
+            
+            // Amplitudes (radians)
+            const amp1 = Math.PI * 0.6;
+            const amp2 = Math.PI * 1.1;
+
+            // Phase shift for aesthetic asymmetry
+            const phase2 = Math.PI / 3;
+
+            const theta1 = amp1 * Math.sin(2 * Math.PI * freq1 * progress);
+            const theta2 = amp2 * Math.sin(2 * Math.PI * freq2 * progress + phase2);
+
+            // Arm lengths (scaled for 1600px internal resolution)
+            const L1 = 380;
+            const L2 = 380;
+
+            // Anchor point (Center-topish)
+            const x0 = 800;
+            const y0 = 400;
+
+            // Calculate Joint 1 (Elbow)
+            const x1 = x0 + L1 * Math.sin(theta1);
+            const y1 = y0 + L1 * Math.cos(theta1);
+
+            // Calculate Joint 2 (Tip)
+            const x2 = x1 + L2 * Math.sin(theta2);
+            const y2 = y1 + L2 * Math.cos(theta2);
+
+            // 4. Draw Arm 1 (Cyan)
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 6;
+            ctx.lineCap = 'round';
+            ctx.shadowColor = '#00ffff';
+            ctx.shadowBlur = 15;
+            ctx.stroke();
+
+            // 5. Draw Arm 2 (Purple)
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.strokeStyle = '#ff00ff';
+            ctx.lineWidth = 6;
+            ctx.lineCap = 'round';
+            ctx.shadowColor = '#ff00ff';
+            ctx.shadowBlur = 15;
+            ctx.stroke();
+
+            // Draw Glowing Joints
+            ctx.beginPath();
+            ctx.arc(x1, y1, 8, 0, 2 * Math.PI);
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = '#00ffff';
+            ctx.shadowBlur = 20;
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(x2, y2, 12, 0, 2 * Math.PI);
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = '#ff00ff';
+            ctx.shadowBlur = 30;
+            ctx.fill();
+
+            // 6. Capture Logic
+            if (isRecording) {
+                capturer.capture(canvas);
+                
+                // Stop exactly at frame 599 to ensure perfectly seamless loops
+                if (frameCount === TOTAL_FRAMES - 1) {
+                    capturer.stop();
+                    capturer.save();
+                    isRecording = false;
+                    recordBtn.innerText = "Record Perfect Loop";
+                    recordBtn.disabled = false;
+                }
+            }
+
+            // Advance frame counter deterministically
+            frameCount = (frameCount + 1) % TOTAL_FRAMES;
+
+            // requestAnimationFrame drives the loop, but we ignore its timestamp
+            requestAnimationFrame(renderFrame);
+        }
+
+        // Boot the simulation
+        renderFrame();
+    </script>
+</body>
+</html>
